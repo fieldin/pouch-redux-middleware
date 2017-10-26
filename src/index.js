@@ -231,10 +231,6 @@ function differences(oldDocs, newDocs) {
 function onDbChange(dbPaths, change, dispatch) {
   var changeDoc = change.doc;
 
-  if(path.changeFilter && (! path.changeFilter(changeDoc))) {
-    return;
-  }
-
   dbPaths.forEach(function(path) {
     if (path.changeFilter && !path.changeFilter(changeDoc)) {
       return;
