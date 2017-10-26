@@ -3,9 +3,15 @@ var Queue = require('async-function-queue');
 var extend = require('xtend');
 var equal = require('deep-equal');
 
-module.exports = createPouchMiddleware;
+module.exports = {
+  createPouchMiddleware,
+  destroy
+}
+
+var changes = changes || {};
 
 function createPouchMiddleware(_paths) {
+  var dbsPaths = {};
   var paths = _paths || [];
   if (!Array.isArray(paths)) {
     paths = [paths];
@@ -45,25 +51,37 @@ function createPouchMiddleware(_paths) {
     return spec;
   });
 
-  function listen(path, dispatch, initialBatchDispatched) {
-    path.db.allDocs({ include_docs: true }).then((rawAllDocs) => {
+
+   dbsPaths = paths.reduce(function(result, path) {
+    result[path.db.name] = result[path.db.name] || {db: path.db, paths: []};
+    result[path.db.name]['paths'].push(path);
+    return result;
+  }, {});
+
+
+  function listen(dbPaths, dispatch, initialBatchDispatched) {
+    dbPaths.db.allDocs({ include_docs: true }).then((rawAllDocs) => {
       var allDocs = rawAllDocs.rows.map((doc) => doc.doc);
       var filteredAllDocs = allDocs;
-      if (path.changeFilter) {
-        filteredAllDocs = allDocs.filter(path.changeFilter);
-      }
-      filteredAllDocs.forEach((doc) => {
-        path.docs[doc._id] = doc;
+
+      dbPaths.paths.forEach(path => {
+        if (path.changeFilter) {
+          filteredAllDocs = allDocs.filter(path.changeFilter);
+        }
+        filteredAllDocs.forEach(doc => {
+          path.docs[doc._id] = doc;
+        });
+        path.propagateBatchInsert(filteredAllDocs, dispatch);
+        initialBatchDispatched();
       });
-      path.propagateBatchInsert(filteredAllDocs, dispatch);
-      initialBatchDispatched();
-      var changes = path.db.changes({
+
+      changes[dbPaths.db.name] = dbPaths.db.changes({
         live: true,
         include_docs: true,
         since: 'now',
       });
-      changes.on('change', change => {
-        onDbChange(path, change, dispatch);
+       changes[dbPaths.db.name].on('change', function (change) {
+        onDbChange(dbPaths.paths, change, dispatch);
       });
     }).catch((err) => initialBatchDispatched(err));
   }
@@ -140,11 +158,14 @@ function createPouchMiddleware(_paths) {
   }
 
   return function(options) {
-    paths.forEach((path) => {
-      listen(path, options.dispatch, (err) => {
-        if (path.initialBatchDispatched) {
-          path.initialBatchDispatched(err);
-        }
+    Object.keys(dbsPaths).forEach(db => {
+      listen(dbsPaths[db], options.dispatch, function (err) {
+        
+        dbsPaths[db].paths.forEach(function(path) {
+          if (path.initialBatchDispatched) {
+            path.initialBatchDispatched(err);
+          }
+        })
       });
     });
 
@@ -153,12 +174,20 @@ function createPouchMiddleware(_paths) {
         var returnValue = next(action);
         var newState = options.getState();
 
-        paths.forEach(path => processNewStateForPath(path, newState));
+        paths.forEach(path => {
+          if (isDBChangeListenerOn(path.db.name)) {
+            return processNewStateForPath(path, newState)
+          }
+        });
 
         return returnValue;
       }
     }
   }
+}
+
+function isDBChangeListenerOn(dbName) {
+  return !changes[dbName] || !changes[dbName].isCancelled;
 }
 
 function differences(oldDocs, newDocs) {
@@ -199,27 +228,33 @@ function differences(oldDocs, newDocs) {
   return result;
 }
 
-function onDbChange(path, change, dispatch) {
+function onDbChange(dbPaths, change, dispatch) {
   var changeDoc = change.doc;
 
   if(path.changeFilter && (! path.changeFilter(changeDoc))) {
     return;
   }
 
-  if (changeDoc._deleted) {
-    if (path.docs[changeDoc._id]) {
-      delete path.docs[changeDoc._id];
-      path.propagateDelete(changeDoc, dispatch);
+  dbPaths.forEach(function(path) {
+    if (path.changeFilter && !path.changeFilter(changeDoc)) {
+      return;
     }
-  } else {
-    var oldDoc = path.docs[changeDoc._id];
-    path.docs[changeDoc._id] = changeDoc;
-    if (oldDoc) {
-      path.propagateUpdate(changeDoc, dispatch);
+
+    if (changeDoc._deleted) {
+      if (path.docs[changeDoc._id]) {
+        delete path.docs[changeDoc._id];
+        path.propagateDelete(changeDoc, dispatch);
+      }
     } else {
-      path.propagateInsert(changeDoc, dispatch);
+      var oldDoc = path.docs[changeDoc._id];
+      path.docs[changeDoc._id] = changeDoc;
+      if (oldDoc) {
+        path.propagateUpdate(changeDoc, dispatch);
+      } else {
+        path.propagateInsert(changeDoc, dispatch);
+      }
     }
-  }
+  });
 }
 
 /* istanbul ignore next */
@@ -235,4 +270,14 @@ function defaultAction(action) {
   return function() {
     throw new Error('no action provided for ' + action);
   };
+}
+
+
+function destroy() {
+  var dbNames = Object.keys(changes);
+  dbNames.forEach(dbName => {
+    changes[dbName].removeAllListeners();
+    changes[dbName].cancel();
+    delete changes[dbName];
+  });
 }
