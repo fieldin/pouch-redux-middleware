@@ -272,7 +272,6 @@ function defaultAction(action) {
 function destroy() {
   var dbNames = Object.keys(changes);
   dbNames.forEach(dbName => {
-    changes[dbName].removeAllListeners();
     changes[dbName].cancel();
     delete changes[dbName];
   });
