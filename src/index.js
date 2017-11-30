@@ -173,10 +173,13 @@ function createPouchMiddleware(_paths) {
       return function(action) {
         var returnValue = next(action);
         var newState = options.getState();
+        var actionEntity = getActionEntity(action);
 
         paths.forEach(path => {
-          if (isDBChangeListenerOn(path.db.name)) {
-            return processNewStateForPath(path, newState)
+          if (!actionEntity || path.entity == actionEntity) {
+            if (isDBChangeListenerOn(path.db.name)) {
+              return processNewStateForPath(path, newState)
+            }
           }
         });
 
@@ -184,6 +187,13 @@ function createPouchMiddleware(_paths) {
       }
     }
   }
+}
+
+function getActionEntity(action) {
+  if (!action.data) {
+    return null;
+  }
+  return action.data.length ? action.data[0].entity : action.data.entity;
 }
 
 function isDBChangeListenerOn(dbName) {
