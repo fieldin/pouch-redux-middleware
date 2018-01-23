@@ -59,45 +59,94 @@ function createPouchMiddleware(_paths) {
   }, {});
 
 
-  function listen(dbPaths, dispatch, initialBatchDispatched) {
-    dbPaths.db.allDocs({ include_docs: true }).then((rawAllDocs) => {
-      var allDocs = rawAllDocs.rows.map((doc) => doc.doc);
-      var filteredAllDocs = allDocs;
 
-      dbPaths.paths.forEach(path => {
-        if (path.changeFilter) {
-          filteredAllDocs = allDocs.filter(path.changeFilter);
-        }
-        filteredAllDocs.forEach(doc => {
-          path.docs[doc._id] = doc;
-        });
-        path.propagateBatchInsert(filteredAllDocs, dispatch);
-        initialBatchDispatched();
-      });
-
-      changes[dbPaths.db.name] = dbPaths.db.changes({
-        live: true,
-        include_docs: true,
-        since: 'now',
-      });
-       changes[dbPaths.db.name].on('change', function (change) {
-        onDbChange(dbPaths.paths, change, dispatch);
-      });
-    }).catch((err) => initialBatchDispatched(err));
+  function metaDBListen(dbPaths, dispatch, initialBatchDispatched) {
+    dbPaths.db.allDocs({ include_docs: true })
+    .then((rawAllDocs) => {     
+      var allDocs = rawAllDocs.rows.map(doc => doc.doc);
+      onInitialDataReceived(dbPaths, dispatch, initialBatchDispatched, allDocs);
+    })
+    .catch(err => {
+      return initialBatchDispatched(err);
+    });
   }
+
+
+  function dataDBListen(dbPaths, dispatch, initialBatchDispatched) {
+    findData(dbPaths)
+    .then(rawAllDocs => {
+      var allDocs = rawAllDocs.reduce((result, pathDocs) => {
+        var docs = pathDocs.rows.map(doc => doc.doc);
+        return result.concat(docs)
+      }, []);
+      onInitialDataReceived(dbPaths, dispatch, initialBatchDispatched, allDocs);
+    })
+    .catch(error => {
+      return initialBatchDispatched(err);
+    });
+  }
+
+
+  function findData(dbPaths) {
+    return Promise.all(
+      dbPaths.paths.map(path => allDocs(dbPaths.db, path.entity))
+    );
+  }
+
+
+  function allDocs(db, key) {
+    return db.allDocs({ include_docs: true, startkey: key, endkey: key + '\ufff0' });
+  }
+
+
+  function onInitialDataReceived(dbPaths, dispatch, initialBatchDispatched, allDocs) {
+    dbPaths.paths.forEach(path => {
+      onInitialPathDataReceived(path, dispatch, initialBatchDispatched, allDocs);
+    });
+
+    ListenToDBChanges(dbPaths, dispatch);
+  }
+
+
+  function onInitialPathDataReceived(path, dispatch, initialBatchDispatched, allDocs) {
+    var filteredAllDocs = allDocs;
+
+    if (path.changeFilter) {
+        filteredAllDocs = allDocs.filter(path.changeFilter);
+      }
+      filteredAllDocs.forEach(doc => {
+        path.docs[doc._id] = doc;
+      });
+      path.propagateBatchInsert(filteredAllDocs, dispatch);
+      initialBatchDispatched();
+  }
+
+
+  function ListenToDBChanges(dbPaths, dispatch) {
+    changes[dbPaths.db.name] = dbPaths.db.changes({
+      live: true,
+      include_docs: true,
+      since: 'now'
+    });
+    changes[dbPaths.db.name].on('change', (change) => {
+      onDbChange(dbPaths.paths, change, dispatch);
+    });
+  }
+
 
   function processNewStateForPath(path, state) {
     var docs = jPath.resolve(state, path.path);
 
     /* istanbul ignore else */
     if (docs && docs.length) {
-      docs.forEach(function(docs) {
+      docs.forEach(docs => {
         var diffs = differences(path.docs, docs);
         diffs.new.concat(diffs.updated).forEach(doc => path.insert(doc))
         diffs.deleted.forEach(doc => path.remove(doc));
       });
     }
   }
+
 
   function write(data, responseHandler) {
     return function(done) {
@@ -157,16 +206,36 @@ function createPouchMiddleware(_paths) {
     dispatch(this.actions.batchInsert(docs));
   }
 
+  function initMetaDB(db, options) {
+    metaDBListen(dbsPaths[db], options.dispatch, (err) => {
+      onInitialBatchDispatched(db, err);
+    });
+  }
+
+  function initDataDB(db, options) {
+    dataDBListen(dbsPaths[db], options.dispatch, (err) => {
+      onInitialBatchDispatched(db, err);
+    });
+  }
+
+
+   function onInitialBatchDispatched(db, err) {
+    dbsPaths[db].paths.forEach(path => {
+      if (path.initialBatchDispatched) {
+        path.initialBatchDispatched(err);
+      }
+    });
+  }
+
+
   return function(options) {
-    Object.keys(dbsPaths).forEach(db => {
-      listen(dbsPaths[db], options.dispatch, function (err) {
-        
-        dbsPaths[db].paths.forEach(function(path) {
-          if (path.initialBatchDispatched) {
-            path.initialBatchDispatched(err);
-          }
-        })
-      });
+    Object.keys(dbsPaths).forEach(db => {   // <-- runs on each db
+      if (db === "fieldin_meta") {
+        initMetaDB(db, options);
+      }
+      else {  // <-- this is a company_x db
+        initDataDB(db, options);
+      }
     });
 
     return function(next) {
