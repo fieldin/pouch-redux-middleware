@@ -324,7 +324,12 @@ function onDbChange(dbPaths, change, dispatch) {
       var oldDoc = path.docs[changeDoc._id];
       path.docs[changeDoc._id] = changeDoc;
       if (oldDoc) {
-        path.propagateUpdate(changeDoc, dispatch);
+        var oldDocRev = oldDoc && oldDoc._rev.split('-')[0];
+        var changeDocRev = changeDoc._rev.split('-')[0];
+
+        if (changeDocRev >= oldDocRev || new Date(changeDoc.updated_at) >= new Date(oldDoc.updated_at)) {
+          path.propagateUpdate(changeDoc, dispatch);
+        }
       } else {
         path.propagateInsert(changeDoc, dispatch);
       }
