@@ -81,7 +81,7 @@ function createPouchMiddleware(_paths) {
       }, []);
       onInitialDataReceived(dbPaths, dispatch, initialBatchDispatched, allDocs);
     })
-    .catch(error => {
+    .catch(err => {
       return initialBatchDispatched(err);
     });
   }
