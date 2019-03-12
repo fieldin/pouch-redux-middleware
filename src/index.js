@@ -126,6 +126,7 @@ function createPouchMiddleware(_paths) {
     changes[dbPaths.db.name] = dbPaths.db.changes({
       live: true,
       include_docs: true,
+      return_docs: false,
       since: 'now'
     });
     changes[dbPaths.db.name].on('change', (change) => {
