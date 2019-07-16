@@ -313,14 +313,16 @@ function onDbChange(dbPaths, change, dispatch) {
 
   dbPaths.forEach(function(path) {
     
-    if (changeDoc._deleted) {
+    if (path.changeFilter && !path.changeFilter(changeDoc)) {
+      return;
+    }
+    
+    if (changeDoc._deleted || !!changeDoc.deleted_at) {
       if (path.docs[changeDoc._id]) {
         delete path.docs[changeDoc._id];
         path.propagateDelete(changeDoc, dispatch);
       }
-    } else if (path.changeFilter && !path.changeFilter(changeDoc)) {
-      return;
-    }
+    } 
     else {
       var oldDoc = path.docs[changeDoc._id];
       path.docs[changeDoc._id] = changeDoc;
