@@ -317,7 +317,7 @@ function onDbChange(dbPaths, change, dispatch) {
       return;
     }
     
-    if (changeDoc._deleted || !!changeDoc.deleted_at) {
+    if (changeDoc._deleted) {
       if (path.docs[changeDoc._id]) {
         delete path.docs[changeDoc._id];
         path.propagateDelete(changeDoc, dispatch);
