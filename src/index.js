@@ -143,7 +143,15 @@ function createPouchMiddleware(_paths) {
       docs.forEach(docs => {
         var diffs = differences(path.docs, docs);
         diffs.new.concat(diffs.updated).forEach(doc => path.insert(doc))
-        diffs.deleted.forEach(doc => path.remove(doc));
+        diffs.deleted.forEach(doc => {
+          var dbName = path.db.name;
+          var companyDb = +dbName.split("_")[1];
+
+          // means we wont delete from fieldin_meta and that we don't delete polygons / groups
+          if (!!companyDb && doc.entity !== 'polygon' && doc.entity !== 'group') {
+            return path.remove(doc);
+          }
+        });
       });
     }
   }
