@@ -23,7 +23,6 @@ function createPouchMiddleware(_paths) {
 
   var defaultSpec = {
     path: '.',
-    // remove: scheduleRemove,
     insert: scheduleInsert,
     propagateDelete,
     propagateUpdate,
@@ -143,15 +142,6 @@ function createPouchMiddleware(_paths) {
       docs.forEach(docs => {
         var diffs = differences(path.docs, docs);
         diffs.new.concat(diffs.updated).forEach(doc => path.insert(doc))
-        // diffs.deleted.forEach(doc => {
-        //   var dbName = path.db.name;
-        //   var companyDb = +dbName.split("_")[1];
-
-        //   // means we wont delete from fieldin_meta and that we don't delete polygons / groups
-        //   if (!!companyDb && doc.entity !== 'polygon' && doc.entity !== 'group') {
-        //     return path.remove(doc);
-        //   }
-        // });
       });
     }
   }
@@ -186,18 +176,6 @@ function createPouchMiddleware(_paths) {
       this.handleResponse
     ));
   }
-
-  // function scheduleRemove(doc) {
-  //   delete this.docs[doc._id];
-  //   this.queue.push(write(
-  //     {
-  //       type: 'remove',
-  //       doc: doc,
-  //       db: this.db
-  //     },
-  //     this.handleResponse
-  //   ));
-  // }
 
   function propagateDelete(doc, dispatch) {
     dispatch(this.actions.remove(doc));
@@ -282,7 +260,6 @@ function differences(oldDocs, newDocs) {
   var result = {
     new: [],
     updated: [],
-    // deleted: Object.keys(oldDocs).map(oldDocId => oldDocs[oldDocId]),
   };
 
   var checkDoc = function(newDoc) {
@@ -292,7 +269,6 @@ function differences(oldDocs, newDocs) {
     if (! id) {
       warn('doc with no id');
     }
-    // result.deleted = result.deleted.filter(doc => doc._id !== id);
     var oldDoc = oldDocs[id];
     if (! oldDoc) {
       result.new.push(newDoc);
